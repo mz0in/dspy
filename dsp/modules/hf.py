@@ -1,13 +1,10 @@
-import os
-import json
 # from peft import PeftConfig, PeftModel
 # from transformers import AutoModelForSeq2SeqLM, AutoModelForCausalLM, AutoTokenizer, AutoConfig
-from typing import Optional, Literal
+from typing import Literal, Optional
 
 from dsp.modules.lm import LM
+
 # from dsp.modules.finetuning.finetune_hf import preprocess_prompt
-from dsp.modules.cache_utils import CacheMemory, NotebookCacheMemory, cache_turn_on
-import functools
 
 def openai_to_hf(**kwargs):
     hf_kwargs = {}
@@ -37,7 +34,7 @@ class HFModel(LM):
             model (str): HF model identifier to load and use
             checkpoint (str, optional): load specific checkpoints of the model. Defaults to None.
             is_client (bool, optional): whether to access models via client. Defaults to False.
-            hf_device_map (str, optional): HF config strategy to load the model. 
+            hf_device_map (str, optional): HF config strategy to load the model.
                 Recommeded to use "auto", which will help loading large models using accelerate. Defaults to "auto".
         """
 
@@ -47,11 +44,11 @@ class HFModel(LM):
         self.device_map = hf_device_map
         if not self.is_client:
             try:
-                from transformers import AutoModelForSeq2SeqLM, AutoModelForCausalLM, AutoTokenizer, AutoConfig
                 import torch
+                from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
             except ImportError as exc:
                 raise ModuleNotFoundError(
-                    "You need to install Hugging Face transformers library to use HF models."
+                    "You need to install Hugging Face transformers library to use HF models.",
                 ) from exc
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             try:
@@ -72,14 +69,20 @@ class HFModel(LM):
                     #     self.model = AutoModelClass.from_pretrained(peft_config.base_model_name_or_path, return_dict=True, load_in_8bit=True, device_map=hf_device_map)
                     #     self.model = PeftModel.from_pretrained(self.model, checkpoint)
                     # else:
-                    self.model = AutoModelClass.from_pretrained(checkpoint).to("cuda")
+                    if self.device_map:
+                        self.model = AutoModelClass.from_pretrained(checkpoint, device_map=self.device_map)
+                    else:
+                        self.model = AutoModelClass.from_pretrained(checkpoint).to(self.device)
                 else:
-                    self.model = AutoModelClass.from_pretrained(model).to("cuda")
+                    if self.device_map:
+                        self.model = AutoModelClass.from_pretrained(model, device_map=self.device_map)
+                    else:
+                        self.model = AutoModelClass.from_pretrained(model).to(self.device)
                 self.drop_prompt_from_output = False
             except ValueError:
                 self.model = AutoModelForCausalLM.from_pretrained(
                     model if checkpoint is None else checkpoint,
-                    device_map=hf_device_map
+                    device_map=self.device_map,
                 )
                 self.drop_prompt_from_output = True
                 self.tokenizer = AutoTokenizer.from_pretrained(model)

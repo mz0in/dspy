@@ -1,16 +1,19 @@
-import dsp
-import tqdm
 import threading
+import types
+
 import pandas as pd
+import tqdm
+
+import dsp
 
 try:
-    from IPython.display import display as ipython_display, HTML
+    from IPython.display import HTML
+    from IPython.display import display as ipython_display
 except ImportError:
     ipython_display = print
     HTML = lambda x: x
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from dsp.utils import EM
 from dsp.evaluation.utils import *
 
 """
@@ -21,7 +24,7 @@ we print the number of failures, the first N examples that failed, and the first
 
 class Evaluate:
     def __init__(self, *, devset, metric=None, num_threads=1, display_progress=False,
-                 display_table=False, display=True, max_errors=5):
+                 display_table=False, display=True, max_errors=5, return_outputs=False):
         self.devset = devset
         self.metric = metric
         self.num_threads = num_threads
@@ -31,6 +34,7 @@ class Evaluate:
         self.max_errors = max_errors
         self.error_count = 0
         self.error_lock = threading.Lock()
+        self.return_outputs = return_outputs
 
     def _execute_single_thread(self, wrapped_program, devset, display_progress):
         ncorrect = 0
@@ -73,7 +77,7 @@ class Evaluate:
 
     def __call__(self, program, metric=None, devset=None, num_threads=None,
                  display_progress=None, display_table=None, display=None,
-                 return_all_scores=False):
+                 return_all_scores=False, return_outputs=False):
         metric = metric if metric is not None else self.metric
         devset = devset if devset is not None else self.devset
         num_threads = num_threads if num_threads is not None else self.num_threads
@@ -83,7 +87,9 @@ class Evaluate:
         display = self.display if display is None else display
         display_progress = display_progress and display
         display_table = display_table if display else False
-
+        return_outputs = return_outputs if return_outputs is not False else self.return_outputs
+        results = []
+        
         def wrapped_program(example_idx, example):
             # NOTE: TODO: Won't work if threads create threads!
             creating_new_thread = threading.get_ident() not in dsp.settings.stack_by_thread
@@ -122,6 +128,8 @@ class Evaluate:
             reordered_devset, ncorrect, ntotal = self._execute_single_thread(wrapped_program, devset, display_progress)
         else:
             reordered_devset, ncorrect, ntotal = self._execute_multi_thread(wrapped_program, devset, num_threads, display_progress)
+        if return_outputs:  # Handle the return_outputs logic
+            results = [(example, prediction, score) for _, example, prediction, score in reordered_devset]
 
         if display:
             print(f"Average Metric: {ncorrect} / {ntotal}  ({round(100 * ncorrect / ntotal, 1)}%)")
@@ -136,8 +144,9 @@ class Evaluate:
         # Truncate every cell in the DataFrame
         df = df.applymap(truncate_cell)
 
-        # Rename the 'correct' column to the name of the metric function
-        metric_name = metric.__name__
+        # Rename the 'correct' column to the name of the metric object
+        assert(callable(metric))
+        metric_name = metric.__name__ if isinstance(metric, types.FunctionType) else metric.__class__.__name__
         df.rename(columns={'correct': metric_name}, inplace=True)
 
         if display_table:
@@ -166,8 +175,12 @@ class Evaluate:
                 """
                 ipython_display(HTML(message))
                 
-        if return_all_scores:
-            return round(100 * ncorrect / ntotal, 2), [score for *_, score in predicted_devset]
+        if return_all_scores and return_outputs:
+            return round(100 * ncorrect / ntotal, 2), results
+        elif return_all_scores:
+            return round(100 * ncorrect / ntotal, 2), [score for *_, score in reordered_devset]
+        elif return_outputs:
+            return round(100 * ncorrect / ntotal, 2), results
 
         return round(100 * ncorrect / ntotal, 2)
 
@@ -208,12 +221,12 @@ def configure_dataframe_display(df, metric_name):
     # Return styled DataFrame
     return df.style.set_table_styles([
         {'selector': 'th', 'props': [('text-align', 'left')]},
-        {'selector': 'td', 'props': [('text-align', 'left')]}
+        {'selector': 'td', 'props': [('text-align', 'left')]},
     ]).set_properties(**{
         'text-align': 'left',
         'white-space': 'pre-wrap',
         'word-wrap': 'break-word',
-        'max-width': '400px'
+        'max-width': '400px',
     })
 
 # FIXME: TODO: The merge_dicts stuff above is way too quick and dirty.

@@ -46,21 +46,21 @@ class LM(ABC):
 
             if prompt != last_prompt:
 
-                if provider=="clarifai":
+                if provider == "clarifai" or provider == "google":
                     printed.append(
                         (
                             prompt,
-                            x['response']
-                        ) 
+                            x['response'],
+                        ),
                     )
-                else:    
+                else:
                     printed.append(
                         (
                             prompt,
                             x["response"].generations
                             if provider == "cohere"
                             else x["response"]["choices"],
-                        )
+                        ),
                     )
 
             last_prompt = prompt
@@ -82,6 +82,8 @@ class LM(ABC):
                 text = ' ' + self._get_choice_text(choices[0]).strip()
             elif provider == "clarifai":
                 text=choices
+            elif provider == "google":
+                text = choices[0].parts[0].text
             else:
                 text = choices[0]["text"]
             self.print_green(text, end="")
@@ -99,4 +101,4 @@ class LM(ABC):
         kwargs = {**self.kwargs, **kwargs}
         model = kwargs.pop('model')
 
-        return self.__class__(model, **kwargs)
+        return self.__class__(model=model, **kwargs)

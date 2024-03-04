@@ -1,14 +1,13 @@
-from collections import defaultdict
-from typing import List, Union
+from typing import List, Optional, Union
+
 import dspy
 from dsp.utils import dotdict
-from typing import Optional
 
 try:
     import weaviate
 except ImportError:
     raise ImportError(
-        "The 'weaviate' extra is required to use WeaviateRM. Install it with `pip install dspy-ai[weaviate]`"
+        "The 'weaviate' extra is required to use WeaviateRM. Install it with `pip install dspy-ai[weaviate]`",
     )
 
 
@@ -31,7 +30,9 @@ class WeaviateRM(dspy.Retrieve):
 
         llm = dspy.OpenAI(model="gpt-3.5-turbo")
         weaviate_client = weaviate.Client("your-path-here")
-        retriever_model = WeaviateRM("my_collection_name", weaviate_client=weaviate_client)
+        retriever_model = WeaviateRM(weaviate_collection_name="my_collection_name",
+                                     weaviate_collection_text_key="content", 
+                                     weaviate_client=weaviate_client)
         dspy.settings.configure(lm=llm, rm=retriever_model)
         ```
 
@@ -44,11 +45,12 @@ class WeaviateRM(dspy.Retrieve):
     def __init__(self, 
                  weaviate_collection_name: str, 
                  weaviate_client: weaviate.Client, 
-                 k: int = 3
+                 k: int = 3,
+                 weaviate_collection_text_key: Optional[str] = "content",
         ):
         self._weaviate_collection_name = weaviate_collection_name
         self._weaviate_client = weaviate_client
-
+        self._weaviate_collection_text_key = weaviate_collection_text_key
         super().__init__(k=k)
 
     def forward(self, query_or_queries: Union[str, List[str]], k: Optional[int]) -> dspy.Prediction:
@@ -71,13 +73,13 @@ class WeaviateRM(dspy.Retrieve):
         passages = []
         for query in queries:
             results = self._weaviate_client.query\
-                .get(self._weaviate_collection_name, ["content"])\
+                .get(self._weaviate_collection_name, [self._weaviate_collection_text_key])\
                 .with_hybrid(query=query)\
                 .with_limit(k)\
                 .do()
 
             results = results["data"]["Get"][self._weaviate_collection_name]
-            parsed_results = [result["content"] for result in results]
+            parsed_results = [result[self._weaviate_collection_text_key] for result in results]
             passages.extend(dotdict({"long_text": d}) for d in parsed_results)
 
         return passages

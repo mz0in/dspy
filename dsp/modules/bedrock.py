@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
 import json
+from typing import Any
+
 from dsp.modules.aws_lm import AWSLM
 
 
@@ -30,7 +31,13 @@ class Bedrock(AWSLM):
             truncate_long_prompts=False,
             input_output_ratio=input_output_ratio,
             max_new_tokens=max_new_tokens,
+            batch_n=True,  # Bedrock does not support the `n` parameter
         )
+        self._validate_model(model)
+
+    def _validate_model(self, model: str) -> None:
+        if "claude" not in model.lower():
+            raise NotImplementedError("Only claude models are supported as of now")
 
     def _create_body(self, prompt: str, **kwargs) -> dict[str, str | float]:
         base_args: dict[str, Any] = {
@@ -41,7 +48,12 @@ class Bedrock(AWSLM):
         query_args: dict[str, Any] = self._sanitize_kwargs(base_args)
         query_args["prompt"] = prompt
         # AWS Bedrock forbids these keys
-
+        if "max_tokens" in query_args:
+            max_tokens: int = query_args["max_tokens"]
+            input_tokens: int = self._estimate_tokens(prompt)
+            max_tokens_to_sample: int = max_tokens - input_tokens
+            del query_args["max_tokens"]
+            query_args["max_tokens_to_sample"] = max_tokens_to_sample
         return query_args
 
     def _call_model(self, body: str) -> str:
@@ -56,7 +68,7 @@ class Bedrock(AWSLM):
         return completion
 
     def _extract_input_parameters(
-        self, body: dict[Any, Any]
+        self, body: dict[Any, Any],
     ) -> dict[str, str | float | int]:
         return body
 
